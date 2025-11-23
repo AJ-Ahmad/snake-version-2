@@ -34,14 +34,23 @@ class SnakeGame:
         self.food_color = self.difficulties[self.difficulty]["color"]
         self.text_color = "#ffffff"
 
+        # Level system configuration
+        self.level_threshold = 50  # Points needed per level
+        self.initial_speed = self.difficulties[self.difficulty]["speed"]
+        self.obstacle_start_level = 3  # Level when obstacles start appearing
+        self.obstacles_per_level = 3  # Number of obstacles added per level
+        
         # Game state
         self.snake = [(10, 10), (9, 10), (8, 10)]
         self.direction = "Right"
         self.next_direction = "Right"
         self.food = None
         self.score = 0
+        self.level = 1
+        self.obstacles = []
         self.game_running = False
         self.game_over = False
+        self.level_up_message = None  # For displaying level-up animation
 
         # Create UI
         self.create_widgets()
@@ -66,18 +75,27 @@ class SnakeGame:
         )
         title_label.pack()
 
-        # Score frame
-        score_frame = tk.Frame(self.root, bg=self.bg_color)
-        score_frame.pack(pady=5)
+        # Score and Level frame
+        info_frame = tk.Frame(self.root, bg=self.bg_color)
+        info_frame.pack(pady=5)
+
+        self.level_label = tk.Label(
+            info_frame,
+            text=f"Level: {self.level}",
+            font=("Arial", 14, "bold"),
+            bg=self.bg_color,
+            fg="#00ddff",
+        )
+        self.level_label.pack(side=tk.LEFT, padx=10)
 
         self.score_label = tk.Label(
-            score_frame,
+            info_frame,
             text=f"Score: {self.score}",
             font=("Arial", 14),
             bg=self.bg_color,
             fg=self.food_color,
         )
-        self.score_label.pack()
+        self.score_label.pack(side=tk.LEFT, padx=10)
 
         # Difficulty selector
         difficulty_frame = tk.Frame(self.root, bg=self.bg_color)
@@ -200,6 +218,22 @@ class SnakeGame:
                 color = self.grid_color_dark if (i + j) % 2 == 0 else self.grid_color
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
 
+        # Draw obstacles
+        for x, y in self.obstacles:
+            x1 = x * self.cell_size + 2
+            y1 = y * self.cell_size + 2
+            x2 = x1 + self.cell_size - 4
+            y2 = y1 + self.cell_size - 4
+            self.canvas.create_rectangle(
+                x1,
+                y1,
+                x2,
+                y2,
+                fill="#444466",
+                outline="#6677aa",
+                width=2,
+            )
+
         # Draw food
         if self.food:
             x, y = self.food
@@ -257,13 +291,80 @@ class SnakeGame:
                     outline="#1a4d7a",
                     width=1,
                 )
+        
+        # Draw level-up message if active
+        if self.level_up_message and self.level_up_message > 0:
+            # Calculate opacity based on remaining frames
+            alpha = min(255, self.level_up_message * 8)
+            
+            # Draw semi-transparent overlay
+            self.canvas.create_rectangle(
+                0, 
+                self.cell_size * self.grid_height // 3,
+                self.cell_size * self.grid_width,
+                self.cell_size * self.grid_height // 3 + 80,
+                fill="#00ddff",
+                stipple="gray50",
+                outline=""
+            )
+            
+            # Draw LEVEL UP text
+            self.canvas.create_text(
+                self.cell_size * self.grid_width // 2,
+                self.cell_size * self.grid_height // 3 + 25,
+                text="LEVEL UP!",
+                font=("Arial", 24, "bold"),
+                fill="#00ddff",
+            )
+            
+            # Draw new level number
+            self.canvas.create_text(
+                self.cell_size * self.grid_width // 2,
+                self.cell_size * self.grid_height // 3 + 55,
+                text=f"Level {self.level}",
+                font=("Arial", 16, "bold"),
+                fill="#ffffff",
+            )
 
+    def generate_obstacles(self):
+        """Generate obstacles for the current level"""
+        # Calculate how many obstacles should be present
+        target_count = (self.level - self.obstacle_start_level + 1) * self.obstacles_per_level
+        
+        # Only add new obstacles if we need more
+        obstacles_to_add = target_count - len(self.obstacles)
+        
+        if obstacles_to_add <= 0:
+            return
+        
+        # Get all occupied cells
+        occupied = set(self.snake) | set(self.obstacles)
+        if self.food:
+            occupied.add(self.food)
+        
+        # Find free cells (avoid center area where snake starts)
+        center_x, center_y = self.grid_width // 2, self.grid_height // 2
+        free_cells = [
+            (x, y)
+            for x in range(self.grid_width)
+            for y in range(self.grid_height)
+            if (x, y) not in occupied
+            and (abs(x - center_x) > 3 or abs(y - center_y) > 3)  # Keep center clear
+        ]
+        
+        # Add new obstacles
+        if free_cells:
+            for _ in range(min(obstacles_to_add, len(free_cells))):
+                obstacle = random.choice(free_cells)
+                self.obstacles.append(obstacle)
+                free_cells.remove(obstacle)
+    
     def place_food(self):
         free_cells = [
             (x, y)
             for x in range(self.grid_width)
             for y in range(self.grid_height)
-            if (x, y) not in self.snake
+            if (x, y) not in self.snake and (x, y) not in self.obstacles
         ]
         if free_cells:
             self.food = random.choice(free_cells)
@@ -291,11 +392,15 @@ class SnakeGame:
         self.direction = "Right"
         self.next_direction = "Right"
         self.score = 0
+        self.level = 1
+        self.obstacles = []
         self.game_running = False
         self.game_over = False
+        self.level_up_message = None
         self.speed = self.difficulties[self.difficulty]["speed"]
 
         self.score_label.config(text=f"Score: {self.score}", fg=self.food_color)
+        self.level_label.config(text=f"Level: {self.level}")
         self.start_button.config(state=tk.NORMAL)
         self.pause_button.config(state=tk.DISABLED, text="PAUSE")
 
@@ -345,13 +450,14 @@ class SnakeGame:
 
         new_head = (head_x, head_y)
 
-        # Check collisions
+        # Check collisions (walls, self, obstacles)
         if (
             head_x < 0
             or head_x >= self.grid_width
             or head_y < 0
             or head_y >= self.grid_height
             or new_head in self.snake
+            or new_head in self.obstacles
         ):
             self.end_game()
             return
@@ -361,7 +467,15 @@ class SnakeGame:
 
         # Check if food eaten
         if new_head == self.food:
+            old_level = self.level
             self.score += self.difficulties[self.difficulty]["increment"]
+            
+            # Check for level up
+            new_level = (self.score // self.level_threshold) + 1
+            if new_level > old_level:
+                self.level = new_level
+                self.level_up()
+            
             self.score_label.config(text=f"Score: {self.score}")
             self.place_food()
             self.play_food_sound()
@@ -370,9 +484,31 @@ class SnakeGame:
         else:
             self.snake.pop()
 
+        # Decrement level-up message counter
+        if self.level_up_message and self.level_up_message > 0:
+            self.level_up_message -= 1
+
         self.draw_game()
         self.root.after(self.speed, self.game_loop)
 
+    def level_up(self):
+        """Handle level progression"""
+        self.level_label.config(text=f"Level: {self.level}")
+        
+        # Add obstacles starting from level 3
+        if self.level >= self.obstacle_start_level:
+            self.generate_obstacles()
+        
+        # Play level-up sound
+        self.play_level_up_sound()
+        
+        # Set level-up message for animation
+        self.level_up_message = 30  # Duration in frames
+        
+        # Slight speed increase per level
+        speed_decrease = 5
+        self.speed = max(60, self.speed - speed_decrease)
+    
     def end_game(self):
         self.game_running = False
         self.game_over = True
@@ -390,16 +526,23 @@ class SnakeGame:
         )
         self.canvas.create_text(
             self.cell_size * self.grid_width // 2,
-            self.cell_size * self.grid_height // 3 + 30,
+            self.cell_size * self.grid_height // 3 + 25,
             text="GAME OVER!",
             font=("Arial", 24, "bold"),
             fill=self.snake_head_color,
         )
         self.canvas.create_text(
             self.cell_size * self.grid_width // 2,
-            self.cell_size * self.grid_height // 3 + 65,
-            text=f"Final Score: {self.score}",
-            font=("Arial", 16),
+            self.cell_size * self.grid_height // 3 + 55,
+            text=f"Level: {self.level}",
+            font=("Arial", 14),
+            fill="#00ddff",
+        )
+        self.canvas.create_text(
+            self.cell_size * self.grid_width // 2,
+            self.cell_size * self.grid_height // 3 + 75,
+            text=f"Score: {self.score}",
+            font=("Arial", 14),
             fill=self.food_color,
         )
         self.play_game_over_sound()
@@ -427,6 +570,12 @@ class SnakeGame:
             winsound.Beep(400, 120)
             winsound.Beep(300, 120)
             winsound.Beep(200, 160)
+    
+    def play_level_up_sound(self):
+        if winsound:
+            winsound.Beep(800, 80)
+            winsound.Beep(1000, 80)
+            winsound.Beep(1200, 100)
 
 
 if __name__ == "__main__":
